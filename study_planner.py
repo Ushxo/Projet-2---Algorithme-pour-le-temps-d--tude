@@ -392,38 +392,220 @@ def build_study_plan(
 
 
 # =========================
+#   Utilitaires d'entrée
+# =========================
+
+def _input_with_default(prompt: str, default: Optional[str]) -> str:
+    if default is None:
+        return input(f"{prompt} : ").strip()
+    return input(f"{prompt} [{default}] : ").strip()
+
+
+def demander_entier(prompt: str, default: Optional[int] = None, minimum: Optional[int] = None) -> int:
+    while True:
+        raw = _input_with_default(prompt, None if default is None else str(default))
+        if not raw:
+            if default is not None:
+                value = default
+            else:
+                print("Veuillez entrer un nombre entier.")
+                continue
+        else:
+            try:
+                value = int(raw)
+            except ValueError:
+                print("Entrée invalide. Merci d'indiquer un entier.")
+                continue
+        if minimum is not None and value < minimum:
+            print(f"La valeur doit être au minimum {minimum}.")
+            continue
+        return value
+
+
+def demander_flottant(prompt: str, default: Optional[float] = None, minimum: Optional[float] = None) -> float:
+    while True:
+        raw = _input_with_default(prompt, None if default is None else str(default))
+        if not raw:
+            if default is not None:
+                value = default
+            else:
+                print("Veuillez entrer un nombre.")
+                continue
+        else:
+            try:
+                value = float(raw.replace(",", "."))
+            except ValueError:
+                print("Entrée invalide. Merci d'indiquer un nombre (utilisez un point ou une virgule).")
+                continue
+        if minimum is not None and value < minimum:
+            print(f"La valeur doit être au minimum {minimum}.")
+            continue
+        return value
+
+
+def demander_oui_non(prompt: str, default: bool = True) -> bool:
+    default_str = "o" if default else "n"
+    while True:
+        raw = _input_with_default(f"{prompt} (o/n)", default_str)
+        if not raw:
+            return default
+        raw = raw.lower()
+        if raw in {"o", "oui", "y", "yes"}:
+            return True
+        if raw in {"n", "non", "no"}:
+            return False
+        print("Merci de répondre par 'o' ou 'n'.")
+
+
+def demander_jours_bloques(prompt: str) -> Optional[List[int]]:
+    raw = _input_with_default(prompt, "")
+    if not raw:
+        return None
+    try:
+        return [int(x.strip()) for x in raw.split(",") if x.strip()]
+    except ValueError:
+        print("Entrée invalide. Aucun jour bloqué enregistré.")
+        return None
+
+
+def demander_date(prompt: str) -> Optional[dt.date]:
+    raw = _input_with_default(prompt, "")
+    if not raw:
+        return None
+    try:
+        return dt.datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        print("Format de date invalide. Utilisation de la date du jour.")
+        return dt.date.today()
+
+
+# =========================
 #   Exemple d'utilisation
 # =========================
 
 if __name__ == "__main__":
-    # Exemple : 3 chapitres de 70 slides (densité normale), 5 jours
-    contents = [
-        ContentBlock(units=210, unit_type="slide", difficulty=1.05, novelty=1.1, density=1.0)
-    ]
+    print("=== Assistant de planification d'étude ===")
+    print("Appuyez sur Entrée pour conserver la valeur par défaut proposée.")
+
+    nb_blocs = demander_entier("Combien de blocs de contenu souhaitez-vous saisir ?", default=1, minimum=1)
+    contents: List[ContentBlock] = []
+    for i in range(nb_blocs):
+        print(f"\nBloc de contenu #{i+1}")
+        units = demander_entier("Nombre d'unités (pages, slides, minutes de vidéo, exercices)", default=70, minimum=1)
+        unit_type = _input_with_default(
+            "Type d'unité (page/slide/video_min/exo)",
+            "slide"
+        ) or "slide"
+        if unit_type not in UNIT_BASE_MIN:
+            print(f"Type inconnu. Utilisation de 'slide'.")
+            unit_type = "slide"
+        difficulty = demander_flottant("Coefficient de difficulté (0.7 facile, 1.0 moyen, 1.3 difficile)", default=1.0, minimum=0.1)
+        novelty = demander_flottant("Coefficient de nouveauté (0.7 connu, 1.0 mixte, 1.3 nouveau)", default=1.0, minimum=0.1)
+        density = demander_flottant("Coefficient de densité (0.8 aéré, 1.0 normal, 1.2 dense)", default=1.0, minimum=0.1)
+        contents.append(ContentBlock(units=units, unit_type=unit_type, difficulty=difficulty, novelty=novelty, density=density))
+
+    print("\n=== Paramètres d'examen ===")
+    weight_theory = demander_flottant("Poids de la théorie", default=0.4, minimum=0.0)
+    weight_problems = demander_flottant("Poids des problèmes/exercices", default=0.4, minimum=0.0)
+    weight_memorization = demander_flottant("Poids de la mémorisation", default=0.2, minimum=0.0)
+    print("Répartition des types de questions (en pourcentage, la somme sera normalisée)")
+    qcm_pct = demander_flottant("Part des QCM (%)", default=30.0, minimum=0.0)
+    prob_pct = demander_flottant("Part des problèmes (%)", default=60.0, minimum=0.0)
+    redac_pct = demander_flottant("Part de la rédaction (%)", default=10.0, minimum=0.0)
+    total_pct = max(1e-6, qcm_pct + prob_pct + redac_pct)
+    question_mix = {
+        "QCM": qcm_pct / total_pct,
+        "problèmes": prob_pct / total_pct,
+        "rédaction": redac_pct / total_pct,
+    }
     exam = ExamProfile(
-        weight_theory=0.4, weight_problems=0.45, weight_memorization=0.15,
-        question_mix={"QCM":0.3,"problèmes":0.6,"rédaction":0.1}
+        weight_theory=weight_theory,
+        weight_problems=weight_problems,
+        weight_memorization=weight_memorization,
+        question_mix=question_mix,
     )
+
+    print("\n=== Profil utilisateur ===")
+    read_speed_page = demander_flottant("Vitesse de lecture (minutes par page)", default=2.5, minimum=0.1)
+    read_speed_slide = demander_flottant("Vitesse de lecture (minutes par slide)", default=1.0, minimum=0.1)
+    video_multiplier = demander_flottant("Multiplicateur pour les vidéos", default=1.0, minimum=0.1)
+    notes_factor = demander_flottant("Coefficient de prise de notes", default=1.15, minimum=0.5)
+    language_penalty = demander_flottant("Pénalité de langue (1.0 si langue maternelle)", default=1.0, minimum=0.5)
+    exercise_min_each = demander_flottant("Minutes par exercice représentatif", default=7.0, minimum=1.0)
+    problem_set_size = demander_entier("Taille d'un ensemble d'exercices représentatifs", default=12, minimum=1)
+    retention_sensitivity = demander_flottant("Sensibilité à l'oubli (0.5 à 0.8)", default=0.6, minimum=0.1)
+    fatigue_threshold = demander_entier("Seuil de fatigue (minutes dans une journée)", default=150, minimum=30)
+    fatigue_penalty = demander_flottant("Pénalité après seuil de fatigue", default=1.2, minimum=1.0)
+    target_grade = demander_flottant("Objectif de maîtrise (0 à 1)", default=0.8, minimum=0.0)
+    current_mastery = demander_flottant("Maîtrise actuelle estimée (0 à 1)", default=0.5, minimum=0.0)
     user = UserProfile(
-        read_speed_slide_min=1.0,   # 1 min/slide base
-        notes_factor=1.15,
-        target_grade=0.85,
-        current_mastery=0.5
+        read_speed_page_min=read_speed_page,
+        read_speed_slide_min=read_speed_slide,
+        video_multiplier=video_multiplier,
+        notes_factor=notes_factor,
+        language_penalty=language_penalty,
+        exercise_min_each=exercise_min_each,
+        problem_set_size=problem_set_size,
+        retention_sensitivity=retention_sensitivity,
+        fatigue_threshold_min=fatigue_threshold,
+        fatigue_penalty=fatigue_penalty,
+        target_grade=target_grade,
+        current_mastery=current_mastery,
     )
-    constraints = Constraints(days_available=5, max_minutes_per_day=240, min_minutes_per_day=60)
 
-    start = dt.date.today()
-    plan = build_study_plan(contents, exam, user, constraints, start_date=start,
-                            want_mocks=True, mock_duration_min=75, mock_review_ratio=0.6)
+    print("\n=== Contraintes ===")
+    days_available = demander_entier("Nombre de jours disponibles", default=5, minimum=1)
+    max_minutes = demander_entier("Minutes maximales par jour", default=240, minimum=30)
+    min_minutes = demander_entier("Minutes minimales par jour", default=60, minimum=0)
+    blocked = demander_jours_bloques("Jours indisponibles (indices 0..n-1 séparés par des virgules)")
+    constraints = Constraints(
+        days_available=days_available,
+        max_minutes_per_day=max_minutes,
+        min_minutes_per_day=min_minutes,
+        blocked_days=blocked,
+    )
 
-    print("=== RÉSUMÉ ===")
-    print("Total:", plan.total_minutes, "min (", round(plan.total_minutes/60,1), "h)")
-    print("Détails:", plan.breakdown)
-    print("Params:", plan.params_used)
-    print("\n=== PLAN ===")
+    start_date = demander_date("Date de début (AAAA-MM-JJ, vide pour aujourd'hui)")
+    want_mocks = demander_oui_non("Souhaitez-vous inclure des examens blancs ?", default=True)
+    mock_duration = demander_entier("Durée d'un examen blanc (minutes)", default=90, minimum=10)
+    mock_review_ratio = demander_flottant("Part du temps dédiée à la correction (0-1)", default=0.5, minimum=0.0)
+
+    plan = build_study_plan(
+        contents,
+        exam,
+        user,
+        constraints,
+        start_date=start_date,
+        want_mocks=want_mocks,
+        mock_duration_min=mock_duration,
+        mock_review_ratio=mock_review_ratio,
+    )
+
+    breakdown_fr = {
+        "Apprentissage": plan.breakdown["learn"],
+        "Exercices": plan.breakdown["exercises"],
+        "Révision": plan.breakdown["review"],
+        "Examens blancs": plan.breakdown["mock"],
+    }
+    params_fr = {
+        "Objectif": plan.params_used["target_grade"],
+        "Maîtrise actuelle": plan.params_used["current_mastery"],
+        "Jours disponibles": plan.params_used["days_available"],
+        "Minutes max/jour": plan.params_used["max_minutes_per_day"],
+    }
+
+    print("\n=== RÉSUMÉ ===")
+    print(f"Total : {plan.total_minutes} min (soit {round(plan.total_minutes / 60, 1)} h)")
+    print("Répartition :", breakdown_fr)
+    print("Paramètres :", params_fr)
+
+    print("\n=== PLAN QUOTIDIEN ===")
     for item in plan.per_day:
+        date_part = f" ({item.date})" if item.date else ""
         print(
-            f"Jour {item.day_index+1} ({item.date}): "
-            f"Learn {item.learn_min} min | Exos {item.exercises_min} min | "
-            f"Révision {item.review_min} min | Mock {item.mock_min} min"
+            f"Jour {item.day_index + 1}{date_part} : "
+            f"Apprentissage {item.learn_min} min | "
+            f"Exercices {item.exercises_min} min | "
+            f"Révision {item.review_min} min | "
+            f"Examens blancs {item.mock_min} min"
         )
